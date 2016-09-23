@@ -1,7 +1,5 @@
 apply plugin: 'distribution'
 
-ext.hadoopVersion = "2.6.1"
-
 dependencies {
   compile project(":azkaban-common")
 
