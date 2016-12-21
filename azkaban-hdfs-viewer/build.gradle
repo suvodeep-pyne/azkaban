@@ -3,10 +3,10 @@ apply plugin: 'distribution'
 dependencies {
   compile project(":azkaban-common")
 
-  compile "org.apache.hadoop:hadoop-common:$hadoopVersion"
-  compile "org.apache.hadoop:hadoop-mapreduce-client-common:$hadoopVersion"
-  compile "org.apache.hadoop:hadoop-mapreduce-client-core:$hadoopVersion"
-  compile "org.apache.hive:hive-metastore:0.13.1"
+//  compile "org.apache.hadoop:hadoop-common:$hadoopVersion"
+//  compile "org.apache.hadoop:hadoop-mapreduce-client-common:$hadoopVersion"
+//  compile "org.apache.hadoop:hadoop-mapreduce-client-core:$hadoopVersion"
+//  compile "org.apache.hive:hive-metastore:0.13.1"
 }
 
 /**

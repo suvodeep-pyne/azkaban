@@ -1,6 +1,7 @@
 include 'azkaban-common'
 include 'azkaban-exec-server'
 include 'azkaban-hadoop-security-plugin'
+include 'azkaban-hdfs-viewer'
 include 'azkaban-migration'
 include 'azkaban-solo-server'
 include 'azkaban-sql'
