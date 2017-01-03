@@ -1,12 +1,21 @@
 apply plugin: 'distribution'
 
-dependencies {
-  compile project(":azkaban-common")
+ext.libDir = "$projectDir/lib"
 
-//  compile "org.apache.hadoop:hadoop-common:$hadoopVersion"
-//  compile "org.apache.hadoop:hadoop-mapreduce-client-common:$hadoopVersion"
-//  compile "org.apache.hadoop:hadoop-mapreduce-client-core:$hadoopVersion"
-//  compile "org.apache.hive:hive-metastore:0.13.1"
+configurations {
+  distPackage {
+    transitive false
+  }
+  compile.extendsFrom distPackage
+}
+
+dependencies {
+  compile project(":azkaban-web-server")
+  compile project(":azkaban-hadoop-security-plugin")
+
+  compile "org.apache.hive:hive-exec:$hiveVersion"
+  distPackage "org.mongodb:mongo-java-driver:2.10.1"
+  distPackage fileTree(dir: "$libDir", include: '*.jar')
 }
 
 /**
@@ -18,6 +27,9 @@ distributions {
   main {
     contents {
       from(jar) {
+        into 'lib'
+      }
+      from(configurations.distPackage) {
         into 'lib'
       }
     }
