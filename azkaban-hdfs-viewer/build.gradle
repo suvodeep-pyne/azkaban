@@ -3,6 +3,10 @@ apply plugin: 'distribution'
 ext.libDir = "$projectDir/lib"
 
 configurations {
+  /**
+   * TODO Remove jars from lib dir
+   * TODO Consolidate configurations
+   */
   distPackage {
     transitive false
   }
@@ -12,8 +16,11 @@ configurations {
 dependencies {
   compile project(":azkaban-web-server")
   compile project(":azkaban-hadoop-security-plugin")
-
   compile "org.apache.hive:hive-exec:$hiveVersion"
+  compile "org.mongodb:mongo-java-driver:2.10.1"
+  compile fileTree(dir: "$libDir", include: '*.jar')
+
+  distPackage project(":azkaban-hadoop-security-plugin")
   distPackage "org.mongodb:mongo-java-driver:2.10.1"
   distPackage fileTree(dir: "$libDir", include: '*.jar')
 }
