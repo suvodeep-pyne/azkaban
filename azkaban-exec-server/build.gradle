@@ -4,10 +4,13 @@ dependencies {
   compile(project(':azkaban-common'))
   compile('org.apache.kafka:kafka-log4j-appender:0.10.0.0')
   compile('com.googlecode.json-simple:json-simple:1.1.1')
+  compile 'org.apache.ivy:ivy:2.4.0'
+  compile 'org.codehaus.groovy:groovy-all:2.4.10'
 
   testCompile(project(path: ':azkaban-common', configuration: 'testCompile'))
   testCompile(project(':azkaban-common').sourceSets.test.output)
   testCompile('com.google.guava:guava:13.0.1')
+
 }
 
 distributions {
