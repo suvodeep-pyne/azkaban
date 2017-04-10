@@ -17,7 +17,6 @@
 
 package azkaban.execapp;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import groovy.grape.Grape;
@@ -25,6 +24,7 @@ import groovy.lang.GroovyClassLoader;
 import java.io.File;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.log4j.Logger;
@@ -90,9 +90,10 @@ public class ArtifactResolver {
     }
 
     log.info("Resolving artifact: " + artifact);
-    final Map<String, Object> args = ImmutableMap.<String, Object>builder()
-        .put("classLoader", new GroovyClassLoader())
-        .build();
+    final Map<String, Object> args = new HashMap<>();
+    args.put("classLoader", new GroovyClassLoader());
+
+    // args needs to be modifiable
     final URI[] uris = Grape.resolve(args, artifact);
 
     log.info("Resolved artifact(s): " + Arrays.toString(uris));

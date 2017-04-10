@@ -17,15 +17,29 @@
 
 package azkaban.execapp;
 
+import java.io.File;
 import java.net.URI;
+import java.util.List;
+import org.junit.Assert;
 import org.junit.Test;
+
+import static org.junit.Assert.*;
 
 
 public class ArtifactResolverTest {
 
   @Test
-  public void test1() throws Exception {
+  public void testRandomArtifact() throws Exception {
     ArtifactResolver instance = new ArtifactResolver();
-    instance.fetchDependency(new URI("ivy://org.webjars:jquery:2.1.4"));
+    List<URI> uris = instance.fetchDependency(new URI("ivy://org.webjars:jquery:2.1.4"));
+    uris.forEach(uri -> assertTrue(new File(uri).exists()));
   }
+
+  @Test
+  public void testRandomArtifactWithClassifier() throws Exception {
+    ArtifactResolver instance = new ArtifactResolver();
+    List<URI> uris = instance.fetchDependency(new URI("ivy://junit:junit:4.11:sources"));
+    uris.forEach(uri -> assertTrue(new File(uri).exists()));
+  }
+
 }
