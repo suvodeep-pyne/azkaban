@@ -116,7 +116,7 @@ public class ProjectManagerResource extends ResourceContextHolder {
       // Check if project upload runs into any errors, such as the file
       // having blacklisted jars
       Props props = new Props();
-      Map<String, ValidationReport> reports = projectManager.uploadProject(project, archiveFile, "zip", user, props);
+      Map<String, ValidationReport> reports = projectManager.validateAndUploadProject(project, archiveFile, "zip", user, props);
       checkReports(reports);
       return Integer.toString(project.getVersion());
     } catch (ProjectManagerException e) {

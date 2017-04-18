@@ -16,6 +16,19 @@
 
 package azkaban.project;
 
+import azkaban.database.AbstractJdbcLoader;
+import azkaban.flow.Flow;
+import azkaban.project.ProjectLogEvent.EventType;
+import azkaban.user.Permission;
+import azkaban.user.User;
+import azkaban.utils.GZIPUtils;
+import azkaban.utils.JSONUtils;
+import azkaban.utils.Md5Hasher;
+import azkaban.utils.Pair;
+import azkaban.utils.Props;
+import azkaban.utils.PropsUtils;
+import azkaban.utils.Triple;
+import com.google.inject.Inject;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -32,36 +45,22 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import org.apache.commons.dbutils.DbUtils;
 import org.apache.commons.dbutils.QueryRunner;
 import org.apache.commons.dbutils.ResultSetHandler;
 import org.apache.commons.io.IOUtils;
 import org.apache.log4j.Logger;
 
-import azkaban.database.AbstractJdbcLoader;
-import azkaban.flow.Flow;
-import azkaban.project.ProjectLogEvent.EventType;
-import azkaban.user.Permission;
-import azkaban.user.User;
-import azkaban.utils.GZIPUtils;
-import azkaban.utils.JSONUtils;
-import azkaban.utils.Md5Hasher;
-import azkaban.utils.Pair;
-import azkaban.utils.Props;
-import azkaban.utils.PropsUtils;
-import azkaban.utils.Triple;
 
-public class JdbcProjectLoader extends AbstractJdbcLoader implements
-    ProjectLoader {
-  private static final Logger logger = Logger
-      .getLogger(JdbcProjectLoader.class);
+public class JdbcProjectLoader extends AbstractJdbcLoader implements ProjectLoader {
+  private static final Logger logger = Logger.getLogger(JdbcProjectLoader.class);
 
   private static final int CHUCK_SIZE = 1024 * 1024 * 10;
   private File tempDir;
 
   private EncodingType defaultEncodingType = EncodingType.GZIP;
 
+  @Inject
   public JdbcProjectLoader(Props props) {
     super(props);
     tempDir = new File(props.getString("project.temp.dir", "temp"));
@@ -84,20 +83,16 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     return projects;
   }
 
-  private List<Project> fetchAllActiveProjects(Connection connection)
-      throws ProjectManagerException {
+  private List<Project> fetchAllActiveProjects(Connection connection) throws ProjectManagerException {
     QueryRunner runner = new QueryRunner();
 
     ProjectResultHandler handler = new ProjectResultHandler();
     List<Project> projects = null;
     try {
-      projects =
-          runner.query(connection,
-              ProjectResultHandler.SELECT_ALL_ACTIVE_PROJECTS, handler);
+      projects = runner.query(connection, ProjectResultHandler.SELECT_ALL_ACTIVE_PROJECTS, handler);
 
       for (Project project : projects) {
-        List<Triple<String, Boolean, Permission>> permissions =
-            fetchPermissionsForProject(connection, project);
+        List<Triple<String, Boolean, Permission>> permissions = fetchPermissionsForProject(connection, project);
 
         for (Triple<String, Boolean, Permission> entry : permissions) {
           if (entry.getSecond()) {
@@ -130,31 +125,25 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     return project;
   }
 
-  private Project fetchProjectById(Connection connection, int id)
-      throws ProjectManagerException {
+  private Project fetchProjectById(Connection connection, int id) throws ProjectManagerException {
     QueryRunner runner = new QueryRunner();
     // Fetch the project
     Project project = null;
     ProjectResultHandler handler = new ProjectResultHandler();
     try {
-      List<Project> projects =
-          runner.query(connection, ProjectResultHandler.SELECT_PROJECT_BY_ID,
-              handler, id);
+      List<Project> projects = runner.query(connection, ProjectResultHandler.SELECT_PROJECT_BY_ID, handler, id);
       if (projects.isEmpty()) {
-        throw new ProjectManagerException("No project with id " + id
-            + " exists in db.");
+        throw new ProjectManagerException("No project with id " + id + " exists in db.");
       }
 
       project = projects.get(0);
     } catch (SQLException e) {
       logger.error(ProjectResultHandler.SELECT_PROJECT_BY_ID + " failed.");
-      throw new ProjectManagerException(
-          "Query for existing project failed. Project " + id, e);
+      throw new ProjectManagerException("Query for existing project failed. Project " + id, e);
     }
 
     // Fetch the user permissions
-    List<Triple<String, Boolean, Permission>> permissions =
-        fetchPermissionsForProject(connection, project);
+    List<Triple<String, Boolean, Permission>> permissions = fetchPermissionsForProject(connection, project);
 
     for (Triple<String, Boolean, Permission> perm : permissions) {
       if (perm.getThird().toFlags() != 0) {
@@ -169,82 +158,69 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     return project;
   }
 
-    /**
-     * Fetch first project with a given name {@inheritDoc}
-     *
-     * @see azkaban.project.ProjectLoader#fetchProjectByName(java.lang.String)
-     */
-    @Override
-    public Project fetchProjectByName(String name)
-        throws ProjectManagerException {
-        Connection connection = getConnection();
+  /**
+   * Fetch first project with a given name {@inheritDoc}
+   *
+   * @see azkaban.project.ProjectLoader#fetchProjectByName(java.lang.String)
+   */
+  @Override
+  public Project fetchProjectByName(String name) throws ProjectManagerException {
+    Connection connection = getConnection();
 
-        Project project = null;
-        try {
-            project = fetchProjectByName(connection, name);
-        } finally {
-            DbUtils.closeQuietly(connection);
-        }
-
-        return project;
+    Project project = null;
+    try {
+      project = fetchProjectByName(connection, name);
+    } finally {
+      DbUtils.closeQuietly(connection);
     }
 
-    private Project fetchProjectByName(Connection connection, String name)
-        throws ProjectManagerException {
-        QueryRunner runner = new QueryRunner();
-        // Fetch the project
-        Project project = null;
-        ProjectResultHandler handler = new ProjectResultHandler();
-        try {
-            List<Project> projects =
-                runner.query(connection,
-                    ProjectResultHandler.SELECT_PROJECT_BY_NAME, handler, name);
-            if (projects.isEmpty()) {
-                throw new ProjectManagerException(
-                    "No project with name " + name + " exists in db.");
-            }
+    return project;
+  }
 
-            project = projects.get(0);
-        } catch (SQLException e) {
-            logger.error(ProjectResultHandler.SELECT_PROJECT_BY_NAME
-                + " failed.");
-            throw new ProjectManagerException(
-                "Query for existing project failed. Project " + name, e);
-        }
+  private Project fetchProjectByName(Connection connection, String name) throws ProjectManagerException {
+    QueryRunner runner = new QueryRunner();
+    // Fetch the project
+    Project project = null;
+    ProjectResultHandler handler = new ProjectResultHandler();
+    try {
+      List<Project> projects = runner.query(connection, ProjectResultHandler.SELECT_PROJECT_BY_NAME, handler, name);
+      if (projects.isEmpty()) {
+        throw new ProjectManagerException("No project with name " + name + " exists in db.");
+      }
 
-        // Fetch the user permissions
-        List<Triple<String, Boolean, Permission>> permissions =
-            fetchPermissionsForProject(connection, project);
-
-        for (Triple<String, Boolean, Permission> perm : permissions) {
-            if (perm.getThird().toFlags() != 0) {
-                if (perm.getSecond()) {
-                    project
-                        .setGroupPermission(perm.getFirst(), perm.getThird());
-                } else {
-                    project.setUserPermission(perm.getFirst(), perm.getThird());
-                }
-            }
-        }
-
-        return project;
+      project = projects.get(0);
+    } catch (SQLException e) {
+      logger.error(ProjectResultHandler.SELECT_PROJECT_BY_NAME + " failed.");
+      throw new ProjectManagerException("Query for existing project failed. Project " + name, e);
     }
 
-  private List<Triple<String, Boolean, Permission>> fetchPermissionsForProject(
-      Connection connection, Project project) throws ProjectManagerException {
-    ProjectPermissionsResultHandler permHander =
-        new ProjectPermissionsResultHandler();
+    // Fetch the user permissions
+    List<Triple<String, Boolean, Permission>> permissions = fetchPermissionsForProject(connection, project);
+
+    for (Triple<String, Boolean, Permission> perm : permissions) {
+      if (perm.getThird().toFlags() != 0) {
+        if (perm.getSecond()) {
+          project.setGroupPermission(perm.getFirst(), perm.getThird());
+        } else {
+          project.setUserPermission(perm.getFirst(), perm.getThird());
+        }
+      }
+    }
+
+    return project;
+  }
+
+  private List<Triple<String, Boolean, Permission>> fetchPermissionsForProject(Connection connection, Project project)
+      throws ProjectManagerException {
+    ProjectPermissionsResultHandler permHander = new ProjectPermissionsResultHandler();
 
     QueryRunner runner = new QueryRunner();
     List<Triple<String, Boolean, Permission>> permissions = null;
     try {
-      permissions =
-          runner.query(connection,
-              ProjectPermissionsResultHandler.SELECT_PROJECT_PERMISSION,
-              permHander, project.getId());
+      permissions = runner.query(connection, ProjectPermissionsResultHandler.SELECT_PROJECT_PERMISSION, permHander,
+          project.getId());
     } catch (SQLException e) {
-      throw new ProjectManagerException("Query for permissions for "
-          + project.getName() + " failed.", e);
+      throw new ProjectManagerException("Query for permissions for " + project.getName() + " failed.", e);
     }
 
     return permissions;
@@ -257,8 +233,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
    * or the SQL fails
    */
   @Override
-  public Project createNewProject(String name, String description, User creator)
-      throws ProjectManagerException {
+  public Project createNewProject(String name, String description, User creator) throws ProjectManagerException {
     Connection connection = getConnection();
 
     Project project;
@@ -272,8 +247,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     return project;
   }
 
-  private synchronized Project createNewProject(Connection connection,
-      String name, String description, User creator)
+  private synchronized Project createNewProject(Connection connection, String name, String description, User creator)
       throws ProjectManagerException {
     QueryRunner runner = new QueryRunner();
     ProjectResultHandler handler = new ProjectResultHandler();
@@ -281,18 +255,13 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     // See if it exists first.
     try {
       List<Project> project =
-          runner
-              .query(connection,
-                  ProjectResultHandler.SELECT_ACTIVE_PROJECT_BY_NAME, handler,
-                  name);
+          runner.query(connection, ProjectResultHandler.SELECT_ACTIVE_PROJECT_BY_NAME, handler, name);
       if (!project.isEmpty()) {
-        throw new ProjectManagerException("Active project with name " + name
-            + " already exists in db.");
+        throw new ProjectManagerException("Active project with name " + name + " already exists in db.");
       }
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException(
-          "Checking for existing project failed. " + name, e);
+      throw new ProjectManagerException("Checking for existing project failed. " + name, e);
     }
 
     final String INSERT_PROJECT =
@@ -300,15 +269,12 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     // Insert project
     try {
       long time = System.currentTimeMillis();
-      int i =
-          runner.update(connection, INSERT_PROJECT, name, true, time, time,
-              null, creator.getUserId(), description,
-              defaultEncodingType.getNumVal(), null);
+      int i = runner.update(connection, INSERT_PROJECT, name, true, time, time, null, creator.getUserId(), description,
+          defaultEncodingType.getNumVal(), null);
       if (i == 0) {
         throw new ProjectManagerException("No projects have been inserted.");
       }
       connection.commit();
-
     } catch (SQLException e) {
       logger.error(INSERT_PROJECT + " failed.");
       try {
@@ -316,51 +282,46 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
       } catch (SQLException e1) {
         e1.printStackTrace();
       }
-      throw new ProjectManagerException(
-          "Insert project for existing project failed. " + name, e);
+      throw new ProjectManagerException("Insert project for existing project failed. " + name, e);
     }
 
     // Do another query to grab and return the project.
     Project project = null;
     try {
       List<Project> projects =
-          runner
-              .query(connection,
-                  ProjectResultHandler.SELECT_ACTIVE_PROJECT_BY_NAME, handler,
-                  name);
+          runner.query(connection, ProjectResultHandler.SELECT_ACTIVE_PROJECT_BY_NAME, handler, name);
       if (projects.isEmpty()) {
-        throw new ProjectManagerException("No active project with name " + name
-            + " exists in db.");
+        throw new ProjectManagerException("No active project with name " + name + " exists in db.");
       } else if (projects.size() > 1) {
-        throw new ProjectManagerException("More than one active project "
-            + name);
+        throw new ProjectManagerException("More than one active project " + name);
       }
 
       project = projects.get(0);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException(
-          "Checking for existing project failed. " + name, e);
+      throw new ProjectManagerException("Checking for existing project failed. " + name, e);
     }
 
     return project;
   }
 
   @Override
-  public void uploadProjectFile(Project project, int version, String filetype,
-      String filename, File localFile, String uploader)
-      throws ProjectManagerException {
+  public void uploadProjectFile(Project project, int version, String filetype, String filename, File localFile,
+      String uploader) throws ProjectManagerException {
     long startMs = System.currentTimeMillis();
-    logger.info("Uploading to " + project.getName() + " version:" + version
-        + " file:" + filename);
+    logger.info(String.format("Uploading Project: %s file: %s [%d bytes]", project, filename, localFile.length()));
     Connection connection = getConnection();
 
     try {
-      uploadProjectFile(connection, project, version, filetype, filename,
-          localFile, uploader);
+      /* Update DB with new project info */
+      addProjectToProjectVersions(connection, project, version, filetype, filename, localFile, uploader);
+
+      uploadProjectFile(connection, project, version, filename, localFile);
+
       connection.commit();
-      logger.info("project " + project.getName() + " commiting upload " + localFile.getName()
-              + " took " + ((System.currentTimeMillis() - startMs) / 1000) + " seconds.");
+      long duration = (System.currentTimeMillis() - startMs) / 1000;
+      logger.info(String.format("Uploaded Project: %s file: %s [%d bytes] in %d sec",
+          project, filename, localFile.length(), duration));
     } catch (SQLException e) {
       logger.error(e);
       throw new ProjectManagerException("Error getting DB connection.", e);
@@ -369,14 +330,40 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private void uploadProjectFile(Connection connection, Project project,
-      int version, String filetype, String filename, File localFile,
-      String uploader) throws ProjectManagerException {
-    QueryRunner runner = new QueryRunner();
-    long updateTime = System.currentTimeMillis();
+  private void uploadProjectFile(Connection connection, Project project, int version, String filename, File localFile)
+      throws ProjectManagerException {
+    /* Step 1: Upload File in chunks to DB */
+    int chunks = uploadFileInChunks(connection, project, version, filename, localFile);
 
+    /* Step 2: Update number of chunks in DB */
+    updateChunksInProjectVersions(connection, project, version, chunks);
+  }
+
+  /**
+   * Insert a new version record to TABLE project_versions before uploading files.
+   *
+   * The reason for this operation:
+   * When error chunking happens in remote mysql server, incomplete file data remains
+   * in DB, and an SQL exception is thrown. If we don't have this operation before uploading file,
+   * the SQL exception prevents AZ from creating the new version record in Table project_versions.
+   * However, the Table project_files still reserve the incomplete files, which causes troubles
+   * when uploading a new file: Since the version in TABLE project_versions is still old, mysql will stop
+   * inserting new files to db.
+   *
+   * Why this operation is safe:
+   * When AZ uploads a new zip file, it always fetches the latest version proj_v from TABLE project_version,
+   * proj_v+1 will be used as the new version for the uploading files.
+   *
+   * Assume error chunking happens on day 1. proj_v is created for this bad file (old file version + 1).
+   * When we upload a new project zip in day2, new file in day 2 will use the new version (proj_v + 1).
+   * When file uploading completes, AZ will clean all old chunks in DB afterward.
+   */
+  private void addProjectToProjectVersions(Connection connection, Project project, int version, String filetype,
+      String filename, File localFile, String uploader) throws ProjectManagerException {
+    final long updateTime = System.currentTimeMillis();
+    QueryRunner runner = new QueryRunner();
     logger.info("Creating message digest for upload " + localFile.getName());
-    byte[] md5 = null;
+    byte[] md5;
     try {
       md5 = Md5Hasher.md5Hash(localFile);
     } catch (IOException e) {
@@ -385,41 +372,26 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
 
     logger.info("Md5 hash created");
 
-    /**
-     * Insert a new version record to TABLE project_versions before uploading files.
-     *
-     * The reason for this operation:
-     * When error chunking happens in remote mysql server, incomplete file data remains
-     * in DB, and an SQL exception is thrown. If we don't have this operation before uploading file,
-     * the SQL exception prevents AZ from creating the new version record in Table project_versions.
-     * However, the Table project_files still reserve the incomplete files, which causes troubles
-     * when uploading a new file: Since the version in TABLE project_versions is still old, mysql will stop
-     * inserting new files to db.
-     *
-     * Why this operation is safe:
-     * When AZ uploads a new zip file, it always fetches the latest version proj_v from TABLE project_version,
-     * proj_v+1 will be used as the new version for the uploading files.
-     *
-     * Assume error chunking happens on day 1. proj_v is created for this bad file (old file version + 1).
-     * When we upload a new project zip in day2, new file in day 2 will use the new version (proj_v + 1).
-     * When file uploading completes, AZ will clean all old chunks in DB afterward.
-     */
-    final String INSERT_PROJECT_VERSION =
-        "INSERT INTO project_versions (project_id, version, upload_time, uploader, file_type, file_name, md5, num_chunks) values (?,?,?,?,?,?,?,?)";
+    final String INSERT_PROJECT_VERSION = "INSERT INTO project_versions "
+        + "(project_id, version, upload_time, uploader, file_type, file_name, md5, num_chunks) values "
+        + "(?,?,?,?,?,?,?,?)";
 
     try {
-
       /**
        * As we don't know the num_chunks before uploading the file, we initialize it to 0,
        * and will update it after uploading completes.
        */
-      runner.update(connection, INSERT_PROJECT_VERSION, project.getId(),
-          version, updateTime, uploader, filetype, filename, md5, 0);
+      runner.update(connection, INSERT_PROJECT_VERSION, project.getId(), version, updateTime, uploader, filetype,
+          filename, md5, 0);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException("Error initializing project version "
-          + project.getName(), e);
+      throw new ProjectManagerException("Error initializing project version " + project.getName(), e);
     }
+  }
+
+  private int uploadFileInChunks(Connection connection, Project project, int version, String filename, File localFile)
+      throws ProjectManagerException {
+    QueryRunner runner = new QueryRunner();
 
     // Really... I doubt we'll get a > 2gig file. So int casting it is!
     byte[] buffer = new byte[CHUCK_SIZE];
@@ -439,8 +411,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
         }
         try {
           logger.info("Running update for " + filename + " chunk " + chunk);
-          runner.update(connection, INSERT_PROJECT_FILES, project.getId(),
-              version, chunk, size, buf);
+          runner.update(connection, INSERT_PROJECT_FILES, project.getId(), version, chunk, size, buf);
 
           /**
            * We enforce az committing to db when uploading every single chunk,
@@ -463,26 +434,29 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     } finally {
       IOUtils.closeQuietly(bufferedStream);
     }
+    return chunk;
+  }
 
-    /**
-     * we update num_chunks's actual number to db here.
-     */
+  /**
+   * we update num_chunks's actual number to db here.
+   */
+  private void updateChunksInProjectVersions(Connection connection, Project project, int version, int chunk)
+      throws ProjectManagerException {
+
     final String UPDATE_PROJECT_NUM_CHUNKS =
         "UPDATE project_versions SET num_chunks=? WHERE project_id=? AND version=?";
 
+    QueryRunner runner = new QueryRunner();
     try {
       runner.update(connection, UPDATE_PROJECT_NUM_CHUNKS, chunk, project.getId(), version);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error updating project " + project.getId() + " : chunk_num "
-              + chunk, e);
+      throw new ProjectManagerException("Error updating project " + project.getId() + " : chunk_num " + chunk, e);
     }
   }
 
   @Override
-  public ProjectFileHandler getUploadedFile(Project project, int version)
-      throws ProjectManagerException {
+  public ProjectFileHandler getUploadedFile(Project project, int version) throws ProjectManagerException {
     logger.info("Retrieving to " + project.getName() + " version:" + version);
     Connection connection = getConnection();
     ProjectFileHandler handler = null;
@@ -496,8 +470,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public ProjectFileHandler getUploadedFile(int projectId, int version)
-      throws ProjectManagerException {
+  public ProjectFileHandler getUploadedFile(int projectId, int version) throws ProjectManagerException {
     logger.info("Retrieving to " + projectId + " version:" + version);
     Connection connection = getConnection();
     ProjectFileHandler handler = null;
@@ -510,21 +483,18 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     return handler;
   }
 
-  private ProjectFileHandler getUploadedFile(Connection connection,
-      int projectId, int version) throws ProjectManagerException {
+  private ProjectFileHandler getUploadedFile(Connection connection, int projectId, int version)
+      throws ProjectManagerException {
     QueryRunner runner = new QueryRunner();
     ProjectVersionResultHandler pfHandler = new ProjectVersionResultHandler();
 
     List<ProjectFileHandler> projectFiles = null;
     try {
       projectFiles =
-          runner.query(connection,
-              ProjectVersionResultHandler.SELECT_PROJECT_VERSION, pfHandler,
-              projectId, version);
+          runner.query(connection, ProjectVersionResultHandler.SELECT_PROJECT_VERSION, pfHandler, projectId, version);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException(
-          "Query for uploaded file for project id " + projectId + " failed.", e);
+      throw new ProjectManagerException("Query for uploaded file for project id " + projectId + " failed.", e);
     }
     if (projectFiles == null || projectFiles.isEmpty()) {
       return null;
@@ -536,32 +506,25 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     File file = null;
     try {
       try {
-        file =
-            File.createTempFile(projHandler.getFileName(),
-                String.valueOf(version), tempDir);
+        file = File.createTempFile(projHandler.getFileName(), String.valueOf(version), tempDir);
 
         bStream = new BufferedOutputStream(new FileOutputStream(file));
       } catch (IOException e) {
-        throw new ProjectManagerException(
-            "Error creating temp file for stream.");
+        throw new ProjectManagerException("Error creating temp file for stream.");
       }
 
       int collect = 5;
       int fromChunk = 0;
       int toChunk = collect;
       do {
-        ProjectFileChunkResultHandler chunkHandler =
-            new ProjectFileChunkResultHandler();
+        ProjectFileChunkResultHandler chunkHandler = new ProjectFileChunkResultHandler();
         List<byte[]> data = null;
         try {
-          data =
-              runner.query(connection,
-                  ProjectFileChunkResultHandler.SELECT_PROJECT_CHUNKS_FILE,
-                  chunkHandler, projectId, version, fromChunk, toChunk);
+          data = runner.query(connection, ProjectFileChunkResultHandler.SELECT_PROJECT_CHUNKS_FILE, chunkHandler,
+              projectId, version, fromChunk, toChunk);
         } catch (SQLException e) {
           logger.error(e);
-          throw new ProjectManagerException("Query for uploaded file for "
-              + projectId + " failed.", e);
+          throw new ProjectManagerException("Query for uploaded file for " + projectId + " failed.", e);
         }
 
         try {
@@ -599,29 +562,26 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public void changeProjectVersion(Project project, int version, String user)
-      throws ProjectManagerException {
+  public void changeProjectVersion(Project project, int version, String user) throws ProjectManagerException {
     long timestamp = System.currentTimeMillis();
     QueryRunner runner = createQueryRunner();
     try {
       final String UPDATE_PROJECT_VERSION =
           "UPDATE projects SET version=?,modified_time=?,last_modified_by=? WHERE id=?";
 
-      runner.update(UPDATE_PROJECT_VERSION, version, timestamp, user,
-          project.getId());
+      runner.update(UPDATE_PROJECT_VERSION, version, timestamp, user, project.getId());
       project.setVersion(version);
       project.setLastModifiedTimestamp(timestamp);
       project.setLastModifiedUser(user);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException(
-          "Error updating switching project version " + project.getName(), e);
+      throw new ProjectManagerException("Error updating switching project version " + project.getName(), e);
     }
   }
 
   @Override
-  public void updatePermission(Project project, String name, Permission perm,
-      boolean isGroup) throws ProjectManagerException {
+  public void updatePermission(Project project, String name, Permission perm, boolean isGroup)
+      throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
     if (this.allowsOnDuplicateKey()) {
@@ -631,12 +591,11 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
               + "ON DUPLICATE KEY UPDATE modified_time = VALUES(modified_time), permissions = VALUES(permissions)";
 
       try {
-        runner.update(INSERT_PROJECT_PERMISSION, project.getId(), updateTime,
-            name, perm.toFlags(), isGroup);
+        runner.update(INSERT_PROJECT_PERMISSION, project.getId(), updateTime, name, perm.toFlags(), isGroup);
       } catch (SQLException e) {
         logger.error(e);
-        throw new ProjectManagerException("Error updating project "
-            + project.getName() + " permissions for " + name, e);
+        throw new ProjectManagerException("Error updating project " + project.getName() + " permissions for " + name,
+            e);
       }
     } else {
       long updateTime = System.currentTimeMillis();
@@ -644,12 +603,11 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
           "MERGE INTO project_permissions (project_id, modified_time, name, permissions, isGroup) KEY (project_id, name) values (?,?,?,?,?)";
 
       try {
-        runner.update(MERGE_PROJECT_PERMISSION, project.getId(), updateTime,
-            name, perm.toFlags(), isGroup);
+        runner.update(MERGE_PROJECT_PERMISSION, project.getId(), updateTime, name, perm.toFlags(), isGroup);
       } catch (SQLException e) {
         logger.error(e);
-        throw new ProjectManagerException("Error updating project "
-            + project.getName() + " permissions for " + name, e);
+        throw new ProjectManagerException("Error updating project " + project.getName() + " permissions for " + name,
+            e);
       }
     }
 
@@ -661,8 +619,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public void updateProjectSettings(Project project)
-      throws ProjectManagerException {
+  public void updateProjectSettings(Project project) throws ProjectManagerException {
     Connection connection = getConnection();
     try {
       updateProjectSettings(connection, project, defaultEncodingType);
@@ -674,11 +631,10 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private void updateProjectSettings(Connection connection, Project project,
-      EncodingType encType) throws ProjectManagerException {
+  private void updateProjectSettings(Connection connection, Project project, EncodingType encType)
+      throws ProjectManagerException {
     QueryRunner runner = new QueryRunner();
-    final String UPDATE_PROJECT_SETTINGS =
-        "UPDATE projects SET enc_type=?, settings_blob=? WHERE id=?";
+    final String UPDATE_PROJECT_SETTINGS = "UPDATE projects SET enc_type=?, settings_blob=? WHERE id=?";
 
     String json = JSONUtils.toJSON(project.toObject());
     byte[] data = null;
@@ -689,25 +645,22 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
       if (encType == EncodingType.GZIP) {
         data = GZIPUtils.gzipBytes(stringData);
       }
-      logger.debug("NumChars: " + json.length() + " UTF-8:" + stringData.length
-          + " Gzip:" + data.length);
+      logger.debug("NumChars: " + json.length() + " UTF-8:" + stringData.length + " Gzip:" + data.length);
     } catch (IOException e) {
       throw new ProjectManagerException("Failed to encode. ", e);
     }
 
     try {
-      runner.update(connection, UPDATE_PROJECT_SETTINGS, encType.getNumVal(),
-          data, project.getId());
+      runner.update(connection, UPDATE_PROJECT_SETTINGS, encType.getNumVal(), data, project.getId());
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error updating project "
-          + project.getName() + " version " + project.getVersion(), e);
+      throw new ProjectManagerException(
+          "Error updating project " + project.getName() + " version " + project.getVersion(), e);
     }
   }
 
   @Override
-  public void removePermission(Project project, String name, boolean isGroup)
-      throws ProjectManagerException {
+  public void removePermission(Project project, String name, boolean isGroup) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
     final String DELETE_PROJECT_PERMISSION =
         "DELETE FROM project_permissions WHERE project_id=? AND name=? AND isGroup=?";
@@ -716,8 +669,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
       runner.update(DELETE_PROJECT_PERMISSION, project.getId(), name, isGroup);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException("Error deleting project "
-          + project.getName() + " permissions for " + name, e);
+      throw new ProjectManagerException("Error deleting project " + project.getName() + " permissions for " + name, e);
     }
 
     if (isGroup) {
@@ -728,28 +680,21 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public List<Triple<String, Boolean, Permission>> getProjectPermissions(
-      int projectId) throws ProjectManagerException {
-    ProjectPermissionsResultHandler permHander =
-        new ProjectPermissionsResultHandler();
+  public List<Triple<String, Boolean, Permission>> getProjectPermissions(int projectId) throws ProjectManagerException {
+    ProjectPermissionsResultHandler permHander = new ProjectPermissionsResultHandler();
     QueryRunner runner = createQueryRunner();
     List<Triple<String, Boolean, Permission>> permissions = null;
     try {
-      permissions =
-          runner.query(
-              ProjectPermissionsResultHandler.SELECT_PROJECT_PERMISSION,
-              permHander, projectId);
+      permissions = runner.query(ProjectPermissionsResultHandler.SELECT_PROJECT_PERMISSION, permHander, projectId);
     } catch (SQLException e) {
-      throw new ProjectManagerException("Query for permissions for "
-          + projectId + " failed.", e);
+      throw new ProjectManagerException("Query for permissions for " + projectId + " failed.", e);
     }
 
     return permissions;
   }
 
   @Override
-  public void removeProject(Project project, String user)
-      throws ProjectManagerException {
+  public void removeProject(Project project, String user) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
     long updateTime = System.currentTimeMillis();
@@ -759,22 +704,19 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
       runner.update(UPDATE_INACTIVE_PROJECT, updateTime, user, project.getId());
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException("Error marking project "
-          + project.getName() + " as inactive", e);
+      throw new ProjectManagerException("Error marking project " + project.getName() + " as inactive", e);
     }
   }
 
   @Override
-  public boolean postEvent(Project project, EventType type, String user,
-      String message) {
+  public boolean postEvent(Project project, EventType type, String user, String message) {
     QueryRunner runner = createQueryRunner();
 
     final String INSERT_PROJECT_EVENTS =
         "INSERT INTO project_events (project_id, event_type, event_time, username, message) values (?,?,?,?,?)";
     long updateTime = System.currentTimeMillis();
     try {
-      runner.update(INSERT_PROJECT_EVENTS, project.getId(), type.getNumVal(),
-          updateTime, user, message);
+      runner.update(INSERT_PROJECT_EVENTS, project.getId(), type.getNumVal(), updateTime, user, message);
     } catch (SQLException e) {
       e.printStackTrace();
       return false;
@@ -790,16 +732,14 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
    * @return
    * @throws ProjectManagerException
    */
-  public List<ProjectLogEvent> getProjectEvents(Project project, int num,
-      int skip) throws ProjectManagerException {
+  public List<ProjectLogEvent> getProjectEvents(Project project, int num, int skip) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
     ProjectLogsResultHandler logHandler = new ProjectLogsResultHandler();
     List<ProjectLogEvent> events = null;
     try {
       events =
-          runner.query(ProjectLogsResultHandler.SELECT_PROJECT_EVENTS_ORDER,
-              logHandler, project.getId(), num, skip);
+          runner.query(ProjectLogsResultHandler.SELECT_PROJECT_EVENTS_ORDER, logHandler, project.getId(), num, skip);
     } catch (SQLException e) {
       logger.error(e);
     }
@@ -808,45 +748,38 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public void updateDescription(Project project, String description, String user)
-      throws ProjectManagerException {
+  public void updateDescription(Project project, String description, String user) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
     final String UPDATE_PROJECT_DESCRIPTION =
         "UPDATE projects SET description=?,modified_time=?,last_modified_by=? WHERE id=?";
     long updateTime = System.currentTimeMillis();
     try {
-      runner.update(UPDATE_PROJECT_DESCRIPTION, description, updateTime, user,
-          project.getId());
+      runner.update(UPDATE_PROJECT_DESCRIPTION, description, updateTime, user, project.getId());
       project.setDescription(description);
       project.setLastModifiedTimestamp(updateTime);
       project.setLastModifiedUser(user);
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException("Error marking project "
-          + project.getName() + " as inactive", e);
+      throw new ProjectManagerException("Error marking project " + project.getName() + " as inactive", e);
     }
   }
 
   @Override
-  public int getLatestProjectVersion(Project project)
-      throws ProjectManagerException {
+  public int getLatestProjectVersion(Project project) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
     IntHander handler = new IntHander();
     try {
-      return runner.query(IntHander.SELECT_LATEST_VERSION, handler,
-          project.getId());
+      return runner.query(IntHander.SELECT_LATEST_VERSION, handler, project.getId());
     } catch (SQLException e) {
       logger.error(e);
-      throw new ProjectManagerException("Error marking project "
-          + project.getName() + " as inactive", e);
+      throw new ProjectManagerException("Error marking project " + project.getName() + " as inactive", e);
     }
   }
 
   @Override
-  public void uploadFlows(Project project, int version, Collection<Flow> flows)
-      throws ProjectManagerException {
+  public void uploadFlows(Project project, int version, Collection<Flow> flows) throws ProjectManagerException {
     // We do one at a time instead of batch... because well, the batch could be
     // large.
     logger.info("Uploading flows");
@@ -867,8 +800,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public void uploadFlow(Project project, int version, Flow flow)
-      throws ProjectManagerException {
+  public void uploadFlow(Project project, int version, Flow flow) throws ProjectManagerException {
     logger.info("Uploading flows");
     Connection connection = getConnection();
 
@@ -885,8 +817,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public void updateFlow(Project project, int version, Flow flow)
-      throws ProjectManagerException {
+  public void updateFlow(Project project, int version, Flow flow) throws ProjectManagerException {
     logger.info("Uploading flows");
     Connection connection = getConnection();
 
@@ -900,17 +831,15 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
         data = GZIPUtils.gzipBytes(stringData);
       }
 
-      logger.info("Flow upload " + flow.getId() + " is byte size "
-          + data.length);
+      logger.info("Flow upload " + flow.getId() + " is byte size " + data.length);
       final String UPDATE_FLOW =
           "UPDATE project_flows SET encoding_type=?,json=? WHERE project_id=? AND version=? AND flow_id=?";
       try {
-        runner.update(connection, UPDATE_FLOW, defaultEncodingType.getNumVal(),
-            data, project.getId(), version, flow.getId());
+        runner.update(connection, UPDATE_FLOW, defaultEncodingType.getNumVal(), data, project.getId(), version,
+            flow.getId());
       } catch (SQLException e) {
         e.printStackTrace();
-        throw new ProjectManagerException("Error inserting flow "
-            + flow.getId(), e);
+        throw new ProjectManagerException("Error inserting flow " + flow.getId(), e);
       }
       connection.commit();
     } catch (IOException e) {
@@ -930,9 +859,8 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     this.defaultEncodingType = defaultEncodingType;
   }
 
-  private void uploadFlow(Connection connection, Project project, int version,
-      Flow flow, EncodingType encType) throws ProjectManagerException,
-      IOException {
+  private void uploadFlow(Connection connection, Project project, int version, Flow flow, EncodingType encType)
+      throws ProjectManagerException, IOException {
     QueryRunner runner = new QueryRunner();
     String json = JSONUtils.toJSON(flow.toObject());
     byte[] stringData = json.getBytes("UTF-8");
@@ -946,24 +874,22 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     final String INSERT_FLOW =
         "INSERT INTO project_flows (project_id, version, flow_id, modified_time, encoding_type, json) values (?,?,?,?,?,?)";
     try {
-      runner.update(connection, INSERT_FLOW, project.getId(), version,
-          flow.getId(), System.currentTimeMillis(), encType.getNumVal(), data);
+      runner.update(connection, INSERT_FLOW, project.getId(), version, flow.getId(), System.currentTimeMillis(),
+          encType.getNumVal(), data);
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error inserting flow " + flow.getId(),
-          e);
+      throw new ProjectManagerException("Error inserting flow " + flow.getId(), e);
     }
   }
 
   @Override
-  public Flow fetchFlow(Project project, String flowId)
-      throws ProjectManagerException {
+  public Flow fetchFlow(Project project, String flowId) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
     ProjectFlowsResultHandler handler = new ProjectFlowsResultHandler();
 
     try {
       List<Flow> flows =
-          runner.query(ProjectFlowsResultHandler.SELECT_PROJECT_FLOW, handler,
-              project.getId(), project.getVersion(), flowId);
+          runner.query(ProjectFlowsResultHandler.SELECT_PROJECT_FLOW, handler, project.getId(), project.getVersion(),
+              flowId);
       if (flows.isEmpty()) {
         return null;
       } else {
@@ -975,27 +901,24 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   @Override
-  public List<Flow> fetchAllProjectFlows(Project project)
-      throws ProjectManagerException {
+  public List<Flow> fetchAllProjectFlows(Project project) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
     ProjectFlowsResultHandler handler = new ProjectFlowsResultHandler();
 
     List<Flow> flows = null;
     try {
-      flows =
-          runner.query(ProjectFlowsResultHandler.SELECT_ALL_PROJECT_FLOWS,
-              handler, project.getId(), project.getVersion());
+      flows = runner.query(ProjectFlowsResultHandler.SELECT_ALL_PROJECT_FLOWS, handler, project.getId(),
+          project.getVersion());
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error fetching flows from project "
-          + project.getName() + " version " + project.getVersion(), e);
+      throw new ProjectManagerException(
+          "Error fetching flows from project " + project.getName() + " version " + project.getVersion(), e);
     }
 
     return flows;
   }
 
   @Override
-  public void uploadProjectProperties(Project project, List<Props> properties)
-      throws ProjectManagerException {
+  public void uploadProjectProperties(Project project, List<Props> properties) throws ProjectManagerException {
     Connection connection = getConnection();
 
     try {
@@ -1004,54 +927,46 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
       }
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property files", e);
+      throw new ProjectManagerException("Error uploading project property files", e);
     } catch (IOException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property files", e);
+      throw new ProjectManagerException("Error uploading project property files", e);
     } finally {
       DbUtils.closeQuietly(connection);
     }
   }
 
   @Override
-  public void uploadProjectProperty(Project project, Props props)
-      throws ProjectManagerException {
+  public void uploadProjectProperty(Project project, Props props) throws ProjectManagerException {
     Connection connection = getConnection();
     try {
       uploadProjectProperty(connection, project, props.getSource(), props);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property files", e);
+      throw new ProjectManagerException("Error uploading project property files", e);
     } catch (IOException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property file", e);
+      throw new ProjectManagerException("Error uploading project property file", e);
     } finally {
       DbUtils.closeQuietly(connection);
     }
   }
 
   @Override
-  public void updateProjectProperty(Project project, Props props)
-      throws ProjectManagerException {
+  public void updateProjectProperty(Project project, Props props) throws ProjectManagerException {
     Connection connection = getConnection();
     try {
       updateProjectProperty(connection, project, props.getSource(), props);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property files", e);
+      throw new ProjectManagerException("Error uploading project property files", e);
     } catch (IOException e) {
-      throw new ProjectManagerException(
-          "Error uploading project property file", e);
+      throw new ProjectManagerException("Error uploading project property file", e);
     } finally {
       DbUtils.closeQuietly(connection);
     }
   }
 
-  private void updateProjectProperty(Connection connection, Project project,
-      String name, Props props) throws ProjectManagerException, IOException {
+  private void updateProjectProperty(Connection connection, Project project, String name, Props props)
+      throws ProjectManagerException, IOException {
     QueryRunner runner = new QueryRunner();
     final String UPDATE_PROPERTIES =
         "UPDATE project_properties SET property=? WHERE project_id=? AND version=? AND name=?";
@@ -1063,17 +978,16 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
 
     try {
-      runner.update(connection, UPDATE_PROPERTIES, data, project.getId(),
-          project.getVersion(), name);
+      runner.update(connection, UPDATE_PROPERTIES, data, project.getId(), project.getVersion(), name);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error updating property "
-          + project.getName() + " version " + project.getVersion(), e);
+      throw new ProjectManagerException(
+          "Error updating property " + project.getName() + " version " + project.getVersion(), e);
     }
   }
 
-  private void uploadProjectProperty(Connection connection, Project project,
-      String name, Props props) throws ProjectManagerException, IOException {
+  private void uploadProjectProperty(Connection connection, Project project, String name, Props props)
+      throws ProjectManagerException, IOException {
     QueryRunner runner = new QueryRunner();
     final String INSERT_PROPERTIES =
         "INSERT INTO project_properties (project_id, version, name, modified_time, encoding_type, property) values (?,?,?,?,?,?)";
@@ -1085,28 +999,25 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
 
     try {
-      runner.update(connection, INSERT_PROPERTIES, project.getId(),
-          project.getVersion(), name, System.currentTimeMillis(),
-          defaultEncodingType.getNumVal(), data);
+      runner.update(connection, INSERT_PROPERTIES, project.getId(), project.getVersion(), name,
+          System.currentTimeMillis(), defaultEncodingType.getNumVal(), data);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error uploading project properties "
-          + name + " into " + project.getName() + " version "
-          + project.getVersion(), e);
+      throw new ProjectManagerException(
+          "Error uploading project properties " + name + " into " + project.getName() + " version "
+              + project.getVersion(), e);
     }
   }
 
   @Override
-  public Props fetchProjectProperty(int projectId, int projectVer,
-      String propsName) throws ProjectManagerException {
+  public Props fetchProjectProperty(int projectId, int projectVer, String propsName) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
-    ProjectPropertiesResultsHandler handler =
-        new ProjectPropertiesResultsHandler();
+    ProjectPropertiesResultsHandler handler = new ProjectPropertiesResultsHandler();
     try {
       List<Pair<String, Props>> properties =
-          runner.query(ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTY,
-              handler, projectId, projectVer, propsName);
+          runner.query(ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTY, handler, projectId, projectVer,
+              propsName);
 
       if (properties == null || properties.isEmpty()) {
         return null;
@@ -1114,44 +1025,41 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
 
       return properties.get(0).getSecond();
     } catch (SQLException e) {
-      logger.error("Error fetching property " + propsName
-          + " Project " + projectId + " version " + projectVer, e);
-      throw new ProjectManagerException("Error fetching property " + propsName,
+      logger.error("Error fetching property " + propsName + " Project " + projectId + " version " + projectVer, e);
+      throw new ProjectManagerException("Error fetching property " + propsName, e);
+    }
+  }
+
+  @Override
+  public Props fetchProjectProperty(Project project, String propsName) throws ProjectManagerException {
+    // TODO: 11/23/16 call the other overloaded method fetchProjectProperty internally.
+    QueryRunner runner = createQueryRunner();
+
+    ProjectPropertiesResultsHandler handler = new ProjectPropertiesResultsHandler();
+    try {
+      List<Pair<String, Props>> properties =
+          runner.query(ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTY, handler, project.getId(),
+              project.getVersion(), propsName);
+
+      if (properties == null || properties.isEmpty()) {
+        logger.warn("Project " + project.getId() + " version " + project.getVersion() + " property " + propsName
+            + " is empty.");
+        return null;
+      }
+
+      return properties.get(0).getSecond();
+    } catch (SQLException e) {
+      logger.error(
+          "Error fetching property " + propsName + "Project " + project.getId() + " version " + project.getVersion(),
+          e);
+      throw new ProjectManagerException(
+          "Error fetching property " + propsName + "Project " + project.getId() + " version " + project.getVersion(),
           e);
     }
   }
 
   @Override
-  public Props fetchProjectProperty(Project project, String propsName)
-      throws ProjectManagerException {
-    // TODO: 11/23/16 call the other overloaded method fetchProjectProperty internally.
-    QueryRunner runner = createQueryRunner();
-
-    ProjectPropertiesResultsHandler handler =
-        new ProjectPropertiesResultsHandler();
-    try {
-      List<Pair<String, Props>> properties =
-          runner.query(ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTY,
-              handler, project.getId(), project.getVersion(), propsName);
-
-      if (properties == null || properties.isEmpty()) {
-        logger.warn("Project " + project.getId() + " version " + project.getVersion()
-          + " property " + propsName + " is empty.");
-        return null;
-      }
-
-      return properties.get(0).getSecond();
-    } catch (SQLException e) {
-      logger.error("Error fetching property " + propsName
-          + "Project " + project.getId() + " version " + project.getVersion(), e);
-      throw new ProjectManagerException("Error fetching property " + propsName
-          + "Project " + project.getId() + " version " + project.getVersion(), e);
-    }
-  }
-
-  @Override
-  public void cleanOlderProjectVersion(int projectId, int version)
-      throws ProjectManagerException {
+  public void cleanOlderProjectVersion(int projectId, int version) throws ProjectManagerException {
     Connection connection = getConnection();
 
     try {
@@ -1164,76 +1072,62 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private void cleanOlderProjectVersionFlows(Connection connection,
-      int projectId, int version) throws ProjectManagerException {
-    final String DELETE_FLOW =
-        "DELETE FROM project_flows WHERE project_id=? AND version<?";
+  private void cleanOlderProjectVersionFlows(Connection connection, int projectId, int version)
+      throws ProjectManagerException {
+    final String DELETE_FLOW = "DELETE FROM project_flows WHERE project_id=? AND version<?";
     QueryRunner runner = new QueryRunner();
     try {
       runner.update(connection, DELETE_FLOW, projectId, version);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error deleting project version flows "
-          + projectId + ":" + version, e);
+      throw new ProjectManagerException("Error deleting project version flows " + projectId + ":" + version, e);
     }
   }
 
-  private void cleanOlderProjectVersionProperties(Connection connection,
-      int projectId, int version) throws ProjectManagerException {
-    final String DELETE_PROPERTIES =
-        "DELETE FROM project_properties WHERE project_id=? AND version<?";
+  private void cleanOlderProjectVersionProperties(Connection connection, int projectId, int version)
+      throws ProjectManagerException {
+    final String DELETE_PROPERTIES = "DELETE FROM project_properties WHERE project_id=? AND version<?";
     QueryRunner runner = new QueryRunner();
     try {
       runner.update(connection, DELETE_PROPERTIES, projectId, version);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error deleting project version properties " + projectId + ":"
-              + version, e);
+      throw new ProjectManagerException("Error deleting project version properties " + projectId + ":" + version, e);
     }
   }
 
-  private void cleanOlderProjectFiles(Connection connection, int projectId,
-      int version) throws ProjectManagerException {
-    final String DELETE_PROJECT_FILES =
-        "DELETE FROM project_files WHERE project_id=? AND version<?";
+  private void cleanOlderProjectFiles(Connection connection, int projectId, int version)
+      throws ProjectManagerException {
+    final String DELETE_PROJECT_FILES = "DELETE FROM project_files WHERE project_id=? AND version<?";
     QueryRunner runner = new QueryRunner();
     try {
       runner.update(connection, DELETE_PROJECT_FILES, projectId, version);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException("Error deleting project version files "
-          + projectId + ":" + version, e);
+      throw new ProjectManagerException("Error deleting project version files " + projectId + ":" + version, e);
     }
   }
 
-  private void cleanOlderProjectVersion(Connection connection, int projectId,
-      int version) throws ProjectManagerException {
-    final String UPDATE_PROJECT_VERSIONS =
-        "UPDATE project_versions SET num_chunks=0 WHERE project_id=? AND version<?";
+  private void cleanOlderProjectVersion(Connection connection, int projectId, int version)
+      throws ProjectManagerException {
+    final String UPDATE_PROJECT_VERSIONS = "UPDATE project_versions SET num_chunks=0 WHERE project_id=? AND version<?";
     QueryRunner runner = new QueryRunner();
     try {
       runner.update(connection, UPDATE_PROJECT_VERSIONS, projectId, version);
       connection.commit();
     } catch (SQLException e) {
-      throw new ProjectManagerException(
-          "Error updating project version chunksize " + projectId + ":"
-              + version, e);
+      throw new ProjectManagerException("Error updating project version chunksize " + projectId + ":" + version, e);
     }
   }
 
   @Override
-  public Map<String, Props> fetchProjectProperties(int projectId, int version)
-      throws ProjectManagerException {
+  public Map<String, Props> fetchProjectProperties(int projectId, int version) throws ProjectManagerException {
     QueryRunner runner = createQueryRunner();
 
-    ProjectPropertiesResultsHandler handler =
-        new ProjectPropertiesResultsHandler();
+    ProjectPropertiesResultsHandler handler = new ProjectPropertiesResultsHandler();
     try {
       List<Pair<String, Props>> properties =
-          runner.query(
-              ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTIES,
-              handler, projectId, version);
+          runner.query(ProjectPropertiesResultsHandler.SELECT_PROJECT_PROPERTIES, handler, projectId, version);
 
       if (properties == null || properties.isEmpty()) {
         return null;
@@ -1250,8 +1144,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private static class ProjectResultHandler implements
-      ResultSetHandler<List<Project>> {
+  private static class ProjectResultHandler implements ResultSetHandler<List<Project>> {
     private static String SELECT_PROJECT_BY_NAME =
         "SELECT id, name, active, modified_time, create_time, version, last_modified_by, description, enc_type, settings_blob FROM projects WHERE name=?";
 
@@ -1267,7 +1160,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     @Override
     public List<Project> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<Project> emptyList();
+        return Collections.<Project>emptyList();
       }
 
       ArrayList<Project> projects = new ArrayList<Project>();
@@ -1322,36 +1215,31 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private static class ProjectPermissionsResultHandler implements
-      ResultSetHandler<List<Triple<String, Boolean, Permission>>> {
+  private static class ProjectPermissionsResultHandler implements ResultSetHandler<List<Triple<String, Boolean, Permission>>> {
     private static String SELECT_PROJECT_PERMISSION =
         "SELECT project_id, modified_time, name, permissions, isGroup FROM project_permissions WHERE project_id=?";
 
     @Override
-    public List<Triple<String, Boolean, Permission>> handle(ResultSet rs)
-        throws SQLException {
+    public List<Triple<String, Boolean, Permission>> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<Triple<String, Boolean, Permission>> emptyList();
+        return Collections.<Triple<String, Boolean, Permission>>emptyList();
       }
 
-      ArrayList<Triple<String, Boolean, Permission>> permissions =
-          new ArrayList<Triple<String, Boolean, Permission>>();
+      ArrayList<Triple<String, Boolean, Permission>> permissions = new ArrayList<Triple<String, Boolean, Permission>>();
       do {
         String username = rs.getString(3);
         int permissionFlag = rs.getInt(4);
         boolean val = rs.getBoolean(5);
 
         Permission perm = new Permission(permissionFlag);
-        permissions.add(new Triple<String, Boolean, Permission>(username, val,
-            perm));
+        permissions.add(new Triple<String, Boolean, Permission>(username, val, perm));
       } while (rs.next());
 
       return permissions;
     }
   }
 
-  private static class ProjectFlowsResultHandler implements
-      ResultSetHandler<List<Flow>> {
+  private static class ProjectFlowsResultHandler implements ResultSetHandler<List<Flow>> {
     private static String SELECT_PROJECT_FLOW =
         "SELECT project_id, version, flow_id, modified_time, encoding_type, json FROM project_flows WHERE project_id=? AND version=? AND flow_id=?";
 
@@ -1361,7 +1249,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     @Override
     public List<Flow> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<Flow> emptyList();
+        return Collections.<Flow>emptyList();
       }
 
       ArrayList<Flow> flows = new ArrayList<Flow>();
@@ -1394,15 +1282,13 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
         } catch (IOException e) {
           throw new SQLException("Error retrieving flow data " + flowId, e);
         }
-
       } while (rs.next());
 
       return flows;
     }
   }
 
-  private static class ProjectPropertiesResultsHandler implements
-      ResultSetHandler<List<Pair<String, Props>>> {
+  private static class ProjectPropertiesResultsHandler implements ResultSetHandler<List<Pair<String, Props>>> {
     private static String SELECT_PROJECT_PROPERTY =
         "SELECT project_id, version, name, modified_time, encoding_type, property FROM project_properties WHERE project_id=? AND version=? AND name=?";
 
@@ -1412,11 +1298,10 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     @Override
     public List<Pair<String, Props>> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<Pair<String, Props>> emptyList();
+        return Collections.<Pair<String, Props>>emptyList();
       }
 
-      List<Pair<String, Props>> properties =
-          new ArrayList<Pair<String, Props>>();
+      List<Pair<String, Props>> properties = new ArrayList<Pair<String, Props>>();
       do {
         String name = rs.getString(3);
         int eventType = rs.getInt(5);
@@ -1445,15 +1330,14 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private static class ProjectLogsResultHandler implements
-      ResultSetHandler<List<ProjectLogEvent>> {
+  private static class ProjectLogsResultHandler implements ResultSetHandler<List<ProjectLogEvent>> {
     private static String SELECT_PROJECT_EVENTS_ORDER =
         "SELECT project_id, event_type, event_time, username, message FROM project_events WHERE project_id=? ORDER BY event_time DESC LIMIT ? OFFSET ?";
 
     @Override
     public List<ProjectLogEvent> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<ProjectLogEvent> emptyList();
+        return Collections.<ProjectLogEvent>emptyList();
       }
 
       ArrayList<ProjectLogEvent> events = new ArrayList<ProjectLogEvent>();
@@ -1465,8 +1349,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
         String message = rs.getString(5);
 
         ProjectLogEvent event =
-            new ProjectLogEvent(projectId, EventType.fromInteger(eventType),
-                eventTime, username, message);
+            new ProjectLogEvent(projectId, EventType.fromInteger(eventType), eventTime, username, message);
         events.add(event);
       } while (rs.next());
 
@@ -1474,15 +1357,14 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
     }
   }
 
-  private static class ProjectFileChunkResultHandler implements
-      ResultSetHandler<List<byte[]>> {
+  private static class ProjectFileChunkResultHandler implements ResultSetHandler<List<byte[]>> {
     private static String SELECT_PROJECT_CHUNKS_FILE =
         "SELECT project_id, version, chunk, size, file FROM project_files WHERE project_id=? AND version=? AND chunk >= ? AND chunk < ? ORDER BY chunk ASC";
 
     @Override
     public List<byte[]> handle(ResultSet rs) throws SQLException {
       if (!rs.next()) {
-        return Collections.<byte[]> emptyList();
+        return Collections.<byte[]>emptyList();
       }
 
       ArrayList<byte[]> data = new ArrayList<byte[]>();
@@ -1494,11 +1376,9 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
 
       return data;
     }
-
   }
 
-  private static class ProjectVersionResultHandler implements
-      ResultSetHandler<List<ProjectFileHandler>> {
+  private static class ProjectVersionResultHandler implements ResultSetHandler<List<ProjectFileHandler>> {
     private static String SELECT_PROJECT_VERSION =
         "SELECT project_id, version, upload_time, uploader, file_type, file_name, md5, num_chunks FROM project_versions WHERE project_id=? AND version=?";
 
@@ -1520,8 +1400,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
         int numChunks = rs.getInt(8);
 
         ProjectFileHandler handler =
-            new ProjectFileHandler(projectId, version, uploadTime, uploader,
-                fileType, fileName, numChunks, md5);
+            new ProjectFileHandler(projectId, version, uploadTime, uploader, fileType, fileName, numChunks, md5);
 
         handlers.add(handler);
       } while (rs.next());
@@ -1531,8 +1410,7 @@ public class JdbcProjectLoader extends AbstractJdbcLoader implements
   }
 
   private static class IntHander implements ResultSetHandler<Integer> {
-    private static String SELECT_LATEST_VERSION =
-        "SELECT MAX(version) FROM project_versions WHERE project_id=?";
+    private static String SELECT_LATEST_VERSION = "SELECT MAX(version) FROM project_versions WHERE project_id=?";
 
     @Override
     public Integer handle(ResultSet rs) throws SQLException {

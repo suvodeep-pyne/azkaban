@@ -435,4 +435,9 @@ public class Project {
   public void setVersion(int version) {
     this.version = version;
   }
+
+  @Override
+  public String toString() {
+    return "Project{" + "id=" + id + ", name='" + name + '\'' + ", version=" + version + '}';
+  }
 }

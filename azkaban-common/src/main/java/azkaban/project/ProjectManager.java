@@ -45,6 +45,10 @@ import azkaban.utils.Props;
 import azkaban.utils.PropsUtils;
 import azkaban.utils.Utils;
 
+import static com.google.common.base.Preconditions.*;
+import static java.util.Objects.*;
+
+
 public class ProjectManager {
   private static final Logger logger = Logger.getLogger(ProjectManager.class);
 
@@ -457,44 +461,39 @@ public class ProjectManager {
     return projectLoader.getUploadedFile(project, version);
   }
 
-  public Map<String, ValidationReport> uploadProject(Project project,
+  public Map<String, ValidationReport> validateAndUploadProject(Project project,
       File archive, String fileType, User uploader, Props additionalProps)
       throws ProjectManagerException {
+    requireNonNull(fileType, "Unknown file type for " + archive.getName());
+    checkArgument("zip".equals(fileType), "Unsupported archive type for file " + archive.getName());
+
     logger.info("Uploading files to " + project.getName());
 
     // Unzip.
-    File file = null;
+    File unzippedProjectTempDir;
     try {
-      if (fileType == null) {
-        throw new ProjectManagerException("Unknown file type for "
-            + archive.getName());
-      } else if ("zip".equals(fileType)) {
-        file = unzipFile(archive);
-      } else {
-        throw new ProjectManagerException("Unsupported archive type for file "
-            + archive.getName());
-      }
+      unzippedProjectTempDir = unzipFile(archive);
     } catch (IOException e) {
       throw new ProjectManagerException("Error unzipping file.", e);
     }
 
     // Since props is an instance variable of ProjectManager, and each
-    // invocation to the uploadProject manager needs to pass a different
+    // invocation to the validateAndUploadProject manager needs to pass a different
     // value for the PROJECT_ARCHIVE_FILE_PATH key, it is necessary to
     // create a new instance of Props to make sure these different values
     // are isolated from each other.
     Props prop = new Props(props);
     prop.putAll(additionalProps);
-    prop.put(ValidatorConfigs.PROJECT_ARCHIVE_FILE_PATH,
-        archive.getAbsolutePath());
+    prop.put(ValidatorConfigs.PROJECT_ARCHIVE_FILE_PATH, archive.getAbsolutePath());
+
     // Basically, we want to make sure that for different invocations to the
-    // uploadProject method,
+    // validateAndUploadProject method,
     // the validators are using different values for the
     // PROJECT_ARCHIVE_FILE_PATH configuration key.
     // In addition, we want to reload the validator objects for each upload, so
     // that we can change the validator configuration files without having to
     // restart Azkaban web server. If the XmlValidatorManager is an instance
-    // variable, 2 consecutive invocations to the uploadProject
+    // variable, 2 consecutive invocations to the validateAndUploadProject
     // method might cause the second one to overwrite the
     // PROJECT_ARCHIVE_FILE_PATH configuration parameter
     // of the first, thus causing a wrong archive file path to be passed to the
@@ -507,7 +506,7 @@ public class ProjectManager {
     logger.info("Validating project " + archive.getName()
         + " using the registered validators "
         + validatorManager.getValidatorsInfo().toString());
-    Map<String, ValidationReport> reports = validatorManager.validate(project, file);
+    Map<String, ValidationReport> reports = validatorManager.validate(project, unzippedProjectTempDir);
     ValidationStatus status = ValidationStatus.PASS;
     for (Entry<String, ValidationReport> report : reports.entrySet()) {
       if (report.getValue().getStatus().compareTo(status) > 0) {
@@ -515,69 +514,65 @@ public class ProjectManager {
       }
     }
     if (status == ValidationStatus.ERROR) {
-      logger.error("Error found in upload to " + project.getName()
-          + ". Cleaning up.");
+      logger.error("Error found in upload to " + project.getName() + ". Cleaning up.");
 
       try {
-        FileUtils.deleteDirectory(file);
+        FileUtils.deleteDirectory(unzippedProjectTempDir);
       } catch (IOException e) {
-        file.deleteOnExit();
-        e.printStackTrace();
+        unzippedProjectTempDir.deleteOnExit();
+        logger.error(e);
       }
 
       return reports;
     }
 
-    DirectoryFlowLoader loader =
-        (DirectoryFlowLoader) validatorManager.getDefaultValidator();
-    Map<String, Props> jobProps = loader.getJobProps();
-    List<Props> propProps = loader.getProps();
-
     synchronized (project) {
-      int newVersion = projectLoader.getLatestProjectVersion(project) + 1;
-      Map<String, Flow> flows = loader.getFlowMap();
-      for (Flow flow : flows.values()) {
-        flow.setProjectId(project.getId());
-        flow.setVersion(newVersion);
-      }
-
-      logger.info("Uploading file to db " + archive.getName());
-      projectLoader.uploadProjectFile(project, newVersion, fileType,
-          archive.getName(), archive, uploader.getUserId());
-      logger.info("Uploading flow to db " + archive.getName());
-      projectLoader.uploadFlows(project, newVersion, flows.values());
-      logger.info("Changing project versions " + archive.getName());
-      projectLoader.changeProjectVersion(project, newVersion,
-          uploader.getUserId());
-      project.setFlows(flows);
-      logger.info("Uploading Job properties");
-      projectLoader.uploadProjectProperties(project, new ArrayList<Props>(
-          jobProps.values()));
-      logger.info("Uploading Props properties");
-      projectLoader.uploadProjectProperties(project, propProps);
+      uploadProjectInternal(project, archive, fileType, uploader,
+          (DirectoryFlowLoader) validatorManager.getDefaultValidator());
     }
 
     logger.info("Uploaded project files. Cleaning up temp files.");
     projectLoader.postEvent(project, EventType.UPLOADED, uploader.getUserId(),
         "Uploaded project files zip " + archive.getName());
     try {
-      FileUtils.deleteDirectory(file);
+      FileUtils.deleteDirectory(unzippedProjectTempDir);
     } catch (IOException e) {
-      file.deleteOnExit();
+      unzippedProjectTempDir.deleteOnExit();
       e.printStackTrace();
     }
 
-    logger.info("Cleaning up old install files older than "
-        + (project.getVersion() - projectVersionRetention));
-    projectLoader.cleanOlderProjectVersion(project.getId(),
-        project.getVersion() - projectVersionRetention);
+    logger.info("Cleaning up old install files older than " + (project.getVersion() - projectVersionRetention));
+    projectLoader.cleanOlderProjectVersion(project.getId(), project.getVersion() - projectVersionRetention);
 
     return reports;
   }
 
-  public void updateFlow(Project project, Flow flow)
-      throws ProjectManagerException {
-    projectLoader.updateFlow(project, flow.getVersion(), flow);
+  private void uploadProjectInternal(Project project, File archive, String fileType, User uploader,
+      DirectoryFlowLoader loader) throws ProjectManagerException {
+    Map<String, Props> jobProps = loader.getJobProps();
+    List<Props> propProps = loader.getProps();
+    int newVersion = projectLoader.getLatestProjectVersion(project) + 1;
+    Map<String, Flow> flows = loader.getFlowMap();
+    for (Flow flow : flows.values()) {
+      flow.setProjectId(project.getId());
+      flow.setVersion(newVersion);
+    }
+
+    logger.info("Uploading file to db " + archive.getName());
+    projectLoader.uploadProjectFile(project, newVersion, fileType, archive.getName(), archive, uploader.getUserId());
+
+    logger.info("Uploading flow to db " + archive.getName());
+    projectLoader.uploadFlows(project, newVersion, flows.values());
+
+    logger.info("Changing project versions " + archive.getName());
+    projectLoader.changeProjectVersion(project, newVersion, uploader.getUserId());
+    project.setFlows(flows);
+
+    logger.info("Uploading Job properties");
+    projectLoader.uploadProjectProperties(project, new ArrayList<>(jobProps.values()));
+
+    logger.info("Uploading Props properties");
+    projectLoader.uploadProjectProperties(project, propProps);
   }
 
   private File unzipFile(File archiveFile) throws IOException {

@@ -1710,7 +1710,7 @@ public class ProjectManagerServlet extends LoginAbstractAzkabanServlet {
         out.close();
 
         Map<String, ValidationReport> reports =
-            projectManager.uploadProject(project, archiveFile, type, user,
+            projectManager.validateAndUploadProject(project, archiveFile, type, user,
                 props);
         StringBuffer errorMsgs = new StringBuffer();
         StringBuffer warnMsgs = new StringBuffer();
