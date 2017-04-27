@@ -20,21 +20,30 @@ package azkaban.storage;
 import azkaban.spi.Storage;
 import azkaban.spi.StorageMetadata;
 import com.google.inject.Inject;
+import com.google.inject.name.Named;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+
+import static azkaban.Constants.ConfigurationKeys.*;
 
 
 public class HdfsStorage implements Storage {
+  private final URI rootUri;
+  private final FileSystem fs;
 
   @Inject
-  public HdfsStorage() {
-
+  public HdfsStorage(FileSystem fs, @Named(AZKABAN_STORAGE_HDFS_ROOT_URI) URI rootUri) {
+    this.rootUri = rootUri;
+    this.fs = fs;
   }
 
   @Override
-  public InputStream get(URI key) {
-    throw new UnsupportedOperationException("Method not implemented");
+  public InputStream get(URI key) throws IOException {
+    return fs.open(new Path(key));
   }
 
   @Override

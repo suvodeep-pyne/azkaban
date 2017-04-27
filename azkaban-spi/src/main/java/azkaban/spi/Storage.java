@@ -18,6 +18,7 @@
 package azkaban.spi;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 
@@ -40,7 +41,7 @@ public interface Storage {
    * @return InputStream for fetching the blob. null if the key is not found.
    *
    */
-  InputStream get(URI key);
+  InputStream get(URI key) throws IOException;
 
   /**
    * Put an object and return a key.

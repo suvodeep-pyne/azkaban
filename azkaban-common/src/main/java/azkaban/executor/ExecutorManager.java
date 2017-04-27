@@ -1225,7 +1225,6 @@ public class ExecutorManager extends EventHandler implements
       shutdown = true;
     }
 
-    @SuppressWarnings("unchecked")
     public void run() {
       while (!shutdown) {
         try {

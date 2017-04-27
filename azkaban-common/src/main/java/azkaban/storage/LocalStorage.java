@@ -37,29 +37,24 @@ import static com.google.common.base.Preconditions.*;
 public class LocalStorage implements Storage {
   private static final Logger log = Logger.getLogger(LocalStorage.class);
 
-  final File baseDirectory;
+  final File rootDirectory;
 
-  public LocalStorage(File baseDirectory) {
-    this.baseDirectory = validateBaseDirectory(createIfDoesNotExist(baseDirectory));
+  public LocalStorage(String rootDirectoryPath) {
+    this.rootDirectory = validateRootDirectory(createIfDoesNotExist(rootDirectoryPath));
   }
 
   @Override
-  public InputStream get(URI key) {
-    try {
-      return new FileInputStream(getFile(key));
-    } catch (FileNotFoundException e) {
-      return null;
-    }
+  public InputStream get(URI key) throws IOException {
+    return new FileInputStream(getFile(key));
   }
 
   private File getFile(URI key) {
-    return new File(baseDirectory, key.getPath());
+    return new File(rootDirectory, key.getPath());
   }
 
   @Override
   public URI put(StorageMetadata metadata, File localFile) {
-
-    final File projectDir = new File(baseDirectory, String.valueOf(metadata.getProjectId()));
+    final File projectDir = new File(rootDirectory, String.valueOf(metadata.getProjectId()));
     if (projectDir.mkdir()) {
       log.info("Created project dir: " + projectDir.getAbsolutePath());
     }
@@ -82,7 +77,7 @@ public class LocalStorage implements Storage {
   }
 
   private URI createRelativeURI(File targetFile) {
-    return baseDirectory.toURI().relativize(targetFile.toURI());
+    return rootDirectory.toURI().relativize(targetFile.toURI());
   }
 
   @Override
@@ -90,7 +85,8 @@ public class LocalStorage implements Storage {
     throw new UnsupportedOperationException("delete has not been implemented.");
   }
 
-  private static File createIfDoesNotExist(File baseDirectory) {
+  private static File createIfDoesNotExist(String baseDirectoryPath) {
+    final File baseDirectory = new File(baseDirectoryPath);
     if(!baseDirectory.exists()) {
       baseDirectory.mkdir();
       log.info("Creating dir: " + baseDirectory.getAbsolutePath());
@@ -98,7 +94,7 @@ public class LocalStorage implements Storage {
     return baseDirectory;
   }
 
-  private static File validateBaseDirectory(File baseDirectory) {
+  private static File validateRootDirectory(File baseDirectory) {
     checkArgument(baseDirectory.isDirectory());
     if (!FileIOUtils.isDirWritable(baseDirectory)) {
       throw new IllegalArgumentException("Directory not writable: " + baseDirectory);
